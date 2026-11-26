@@ -331,16 +331,15 @@ def build_ebook(fmt: str, ctx: Context, pandoc: str | None) -> str:
                                "instale MiKTeX ou TeX Live")
         cmd = [pandoc, "-f", "markdown", "-t", "pdf", f"--pdf-engine={engine}",
                "--toc", "--toc-depth=2", "--top-level-division=chapter",
-               "-V", "documentclass=book", "-V", "papersize=6in,9in",
-               "-V", "geometry=top=2cm", "-V", "geometry=bottom=2cm",
-               "-V", "geometry=inner=2cm", "-V", "geometry=outer=2cm",
+               "-V", "documentclass=book",
+               "-V", "geometry=paperwidth=6in,paperheight=9in,top=2cm,bottom=2cm,inner=2cm,outer=2cm",
                "-o", "book.pdf", "manuscript.md"]
         run_checked(cmd, out)
         return "book.pdf"
 
     if fmt in ("mobi", "azw3"):
         if not (out / "book.epub").exists():
-            raise RuntimeError("mobi/azw3 dependem do epub; inclua epub nos formatos ou verifique o erro do epub")
+            raise RuntimeError("mobi/azw3 precisam do epub, que não foi gerado (veja o erro do epub)")
         converter = find_tool("ebook-convert", CALIBRE_FALLBACKS)
         if not converter:
             raise RuntimeError("ebook-convert (Calibre) não encontrado; instale o Calibre")
@@ -472,13 +471,14 @@ def write_chapter_metadata(path: Path, meta: Meta, chapters: list[tuple[str, int
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def build_audio(ctx: Context, want_m4b: bool) -> dict[str, str]:
-    """Creates audiobook/ with chapter mp3 files and book.mp3 (and book.m4b on request)."""
+def build_audio(ctx: Context, want_m4b: bool) -> tuple[dict[str, str], dict[str, str]]:
+    """Creates audiobook/ with chapter mp3 files and book.mp3; book.m4b when requested.
+
+    Returns (produced, errors) keyed by format. mp3 never waits on ffmpeg; a missing
+    ffmpeg only fails the m4b entry.
+    """
     if not edge_tts_available():
         raise RuntimeError("edge-tts não instalado (instale com: python -m pip install edge-tts)")
-    ffmpeg = find_tool("ffmpeg")
-    if want_m4b and not ffmpeg:
-        raise RuntimeError("ffmpeg não encontrado (instale com: winget install Gyan.FFmpeg)")
 
     voice = ctx.manifest["voice"]
     rate = ctx.manifest["rate"]
@@ -517,22 +517,31 @@ def build_audio(ctx: Context, want_m4b: bool) -> dict[str, str]:
         for _, path in chapter_files:
             joined.write(path.read_bytes())
     shutil.rmtree(parts_dir, ignore_errors=True)
-    result = {"mp3": "audiobook/book.mp3"}
+    produced: dict[str, str] = {"mp3": "audiobook/book.mp3"}
+    errors: dict[str, str] = {}
 
     if want_m4b:
-        ffprobe = find_tool("ffprobe")
-        if not ffprobe:
-            raise RuntimeError("ffprobe não encontrado (vem junto com o ffmpeg)")
-        durations = [(title, probe_duration_ms(ffprobe, path)) for title, path in chapter_files]
-        meta_file = audio_dir / "_chapters.txt"
-        write_chapter_metadata(meta_file, ctx.meta, durations)
-        m4b = audio_dir / "book.m4b"
-        run_checked([ffmpeg, "-y", "-loglevel", "error", "-i", str(book_mp3), "-i", str(meta_file),
-                     "-map_metadata", "1", "-map_chapters", "1", "-map", "0:a",
-                     "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart", str(m4b)], audio_dir)
-        meta_file.unlink(missing_ok=True)
-        result["m4b"] = "audiobook/book.m4b"
-    return result
+        try:
+            produced["m4b"] = make_m4b(ctx, audio_dir, book_mp3, chapter_files)
+        except RuntimeError as error:
+            errors["m4b"] = str(error)
+    return produced, errors
+
+
+def make_m4b(ctx: Context, audio_dir: Path, book_mp3: Path, chapter_files: list[tuple[str, Path]]) -> str:
+    ffmpeg = find_tool("ffmpeg")
+    ffprobe = find_tool("ffprobe")
+    if not ffmpeg or not ffprobe:
+        raise RuntimeError("ffmpeg/ffprobe não encontrados (instale com: winget install Gyan.FFmpeg)")
+    durations = [(title, probe_duration_ms(ffprobe, path)) for title, path in chapter_files]
+    meta_file = audio_dir / "_chapters.txt"
+    write_chapter_metadata(meta_file, ctx.meta, durations)
+    m4b = audio_dir / "book.m4b"
+    run_checked([ffmpeg, "-y", "-loglevel", "error", "-i", str(book_mp3), "-i", str(meta_file),
+                 "-map_metadata", "1", "-map_chapters", "1", "-map", "0:a",
+                 "-c:a", "aac", "-b:a", "64k", "-f", "ipod", "-movflags", "+faststart", str(m4b)], audio_dir)
+    meta_file.unlink(missing_ok=True)
+    return "audiobook/book.m4b"
 
 
 def slugify(text: str) -> str:
@@ -693,19 +702,18 @@ def main(argv: list[str] | None = None) -> int:
     if audio_wanted:
         print("🎧 gerando audiobook (edge-tts)...")
         try:
-            produced = build_audio(ctx, want_m4b="m4b" in audio_wanted)
-            for fmt in audio_wanted:
-                if fmt in produced:
-                    ctx.manifest["formats"][fmt] = {"status": "ok", "path": produced[fmt]}
-                    print(f"   ✅ {produced[fmt]}")
-                else:
-                    failures += 1
-                    ctx.manifest["formats"][fmt] = {"status": "failed", "error": "não gerado"}
+            produced, errors = build_audio(ctx, want_m4b="m4b" in audio_wanted)
         except RuntimeError as error:
-            for fmt in audio_wanted:
+            produced, errors = {}, {fmt: str(error) for fmt in audio_wanted}
+        for fmt in audio_wanted:
+            if fmt in produced:
+                ctx.manifest["formats"][fmt] = {"status": "ok", "path": produced[fmt]}
+                print(f"   ✅ {produced[fmt]}")
+            else:
                 failures += 1
-                ctx.manifest["formats"][fmt] = {"status": "failed", "error": str(error)}
-            print(f"   ❌ áudio: {error}")
+                message = errors.get(fmt, "não gerado")
+                ctx.manifest["formats"][fmt] = {"status": "failed", "error": message}
+                print(f"   ❌ {fmt}: {message}")
 
     write_manifest(ctx)
     print(f"🏁 concluído: {len(formats) - failures} ok, {failures} com erro. Manifest: {out_dir / 'manifest.json'}")
