@@ -9,6 +9,8 @@ Transforma texto em livro. Duas origens: um **prompt** (eu escrevo os capítulos
 
 O motor é `scripts/book_engine.py`, ao lado deste arquivo. Ele não reescreve nada: só monta o manuscrito, verifica o texto e chama pandoc, Calibre, LaTeX, ffmpeg e edge-tts.
 
+**Onde roda:** no WSL (distro `OllyUbuntu`), no projeto `~/dev/book-generator`. Se você estiver no Windows, rode tudo pelo WSL: `wsl -d OllyUbuntu -- <comando>`, convertendo caminhos `C:\pasta\x` para `/mnt/c/pasta/x`. Se você já estiver dentro do WSL, rode direto.
+
 ## Parâmetros
 
 | Parâmetro | Padrão | Significado |
@@ -42,10 +44,10 @@ O motor é `scripts/book_engine.py`, ao lado deste arquivo. Ele não reescreve n
 
 1. Lê os parâmetros. Sem `--formats`, usa `ebook`.
 2. Origem prompt: escreve os capítulos e segue para o passo 3 com `--origin prompt`.
-3. Roda o motor (ou `--dry-run` primeiro, se o livro for grande):
+3. Roda o motor (ou `--dry-run` primeiro, se o livro for grande). Passe sempre `--output`, para a saída ficar onde o usuário espera:
 
-```powershell
-python "$HOME\.claude\skills\book-generator\scripts\book_engine.py" --source "C:\caminho\do\livro" --formats epub,pdf
+```bash
+~/dev/book-generator/venv/bin/python ~/dev/book-generator/skills/book-generator/scripts/book_engine.py --source /mnt/c/Users/dsbon/OneDrive/Documentos/meu-livro --formats epub,m4b --output /mnt/c/Users/dsbon/OneDrive/Documentos/meu-livro/exports
 ```
 
 4. Lê o `manifest.json` da saída. Se algum formato falhou, mostro o erro e a instalação que falta (abaixo).
@@ -58,27 +60,29 @@ python "$HOME\.claude\skills\book-generator\scripts\book_engine.py" --source "C:
 - **mp3, m4b:** edge-tts (Python) e internet. m4b também precisa do ffmpeg.
 - **markdown:** nada extra.
 
-Instalação (uma linha por bloco):
+Instalação no WSL (uma linha por bloco):
 
-```powershell
-winget install JohnMacFarlane.Pandoc
+```bash
+brew install pandoc
 ```
 
-```powershell
-winget install Gyan.FFmpeg
+```bash
+sudo apt install ffmpeg
 ```
 
-```powershell
-python -m pip install edge-tts
+```bash
+cd ~/dev/book-generator && python3 -m venv venv && ./venv/bin/pip install edge-tts
 ```
 
-```powershell
-winget install MiKTeX.MiKTeX
+```bash
+sudo apt install texlive-luatex texlive-latex-extra texlive-fonts-recommended
 ```
 
-```powershell
-winget install calibre.calibre
+```bash
+sudo apt install calibre
 ```
+
+O pandoc tem de ser de 2.19 ou mais novo (`--embed-resources`). O `apt` do Ubuntu 22.04 traz a 2.9, por isso use o brew.
 
 ## Privacidade
 
