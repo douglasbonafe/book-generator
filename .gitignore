@@ -11,3 +11,4 @@ v6
 files
 .DS_Store
 temp_appendices
+__pycache__/

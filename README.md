@@ -80,6 +80,14 @@ works for basic generation and compilation using local tools.
 - `migrate_book_outputs.sh` — Helps organize loose outline files into structured
 	book directories under `book_outputs/`.
 
+🤖 Skill para Claude: `/book-generator`
+-------------------------------------
+`skills/book-generator/` contém uma skill do Claude Code que gera ebook (epub, pdf, html,
+markdown, mobi, azw3) e audiobook (mp3, m4b) a partir de um prompt, de um `.md` ou de uma
+pasta com vários `.md`. Formatos e origem são parâmetros, e o padrão preserva o texto dos
+`.md` exatamente. Use `--strict-mode=false` para permitir edição. Detalhes em
+[skills/book-generator/SKILL.md](skills/book-generator/SKILL.md).
+
 ⚙️ Prerequisites
 -------------
 Install the following to get full functionality (macOS / Linux):
